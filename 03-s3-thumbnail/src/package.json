@@ -1,0 +1,9 @@
+{
+  "name": "s3-thumbnail",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.700.0",
+    "sharp": "^0.33.5"
+  }
+}

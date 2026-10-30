@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 05 - SNS fan-out - one publish reaches a Lambda, an SQS-backed Lambda, and (optionally) email
+
+Parameters:
+  NotifyEmail:
+    Type: String
+    Default: ''
+    Description: Optional. Subscribes this address to the topic (you must confirm the email).
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref NotifyEmail, '']]
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 128
+    Timeout: 10
+
+Resources:
+  OrdersTopic:
+    Type: AWS::SNS::Topic
+
+  EmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail
+    Properties:
+      TopicArn: !Ref OrdersTopic
+      Protocol: email
+      Endpoint: !Ref NotifyEmail
+
+  # Subscriber A: Lambda directly subscribed to the topic
+  DirectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-direct
+      RetentionInDays: 3
+
+  DirectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-direct
+      CodeUri: src/direct/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref DirectLogGroup
+      Events:
+        Topic:
+          Type: SNS
+          Properties:
+            Topic: !Ref OrdersTopic
+
+  # Subscriber B: SNS -> SQS -> Lambda (buffered, retryable)
+  BufferQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 60
+
+  BufferQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref BufferQueue]
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: sns.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt BufferQueue.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: !Ref OrdersTopic
+
+  QueueSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OrdersTopic
+      Protocol: sqs
+      Endpoint: !GetAtt BufferQueue.Arn
+      RawMessageDelivery: true
+
+  BufferedLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-buffered
+      RetentionInDays: 3
+
+  BufferedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-buffered
+      CodeUri: src/buffered/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref BufferedLogGroup
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BufferQueue.Arn
+            BatchSize: 5
+
+Outputs:
+  TopicArn:
+    Value: !Ref OrdersTopic

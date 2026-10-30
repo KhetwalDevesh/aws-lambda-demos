@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 03 - S3 upload triggers Lambda that writes a thumbnail to a SEPARATE bucket
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 512
+    Timeout: 30
+
+Resources:
+  # Bucket names are built from a string (not !Ref) on the function side so the
+  # source bucket <-> function <-> role dependency does not become circular.
+  SourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${AWS::StackName}-src-${AWS::AccountId}-${AWS::Region}
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-demo-files
+            Status: Enabled
+            ExpirationInDays: 1
+
+  # Output goes to a different bucket on purpose: writing back into the source
+  # bucket would re-trigger the function forever.
+  ThumbBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-demo-files
+            Status: Enabled
+            ExpirationInDays: 1
+
+  ThumbLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-thumbnail
+      RetentionInDays: 3
+
+  ThumbnailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-thumbnail
+      CodeUri: src/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref ThumbLogGroup
+      Environment:
+        Variables:
+          THUMB_BUCKET: !Ref ThumbBucket
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub ${AWS::StackName}-src-${AWS::AccountId}-${AWS::Region}
+        - S3WritePolicy:
+            BucketName: !Ref ThumbBucket
+      Events:
+        Uploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref SourceBucket
+            Events: s3:ObjectCreated:*
+
+Outputs:
+  SourceBucketName:
+    Value: !Ref SourceBucket
+  ThumbBucketName:
+    Value: !Ref ThumbBucket

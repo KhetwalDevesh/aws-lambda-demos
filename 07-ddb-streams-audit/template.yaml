@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 07 - DynamoDB Streams captures every change and Lambda writes an audit trail
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 128
+    Timeout: 10
+
+Resources:
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+
+  AuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: itemId
+          AttributeType: S
+        - AttributeName: changeId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: itemId
+          KeyType: HASH
+        - AttributeName: changeId
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAt
+        Enabled: true
+
+  AuditLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-audit
+      RetentionInDays: 3
+
+  AuditFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-audit
+      CodeUri: src/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref AuditLogGroup
+      Environment:
+        Variables:
+          AUDIT_TABLE: !Ref AuditTable
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref AuditTable
+      Events:
+        Stream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt CustomersTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 1
+            MaximumRetryAttempts: 2
+
+Outputs:
+  CustomersTableName:
+    Value: !Ref CustomersTable
+  AuditTableName:
+    Value: !Ref AuditTable

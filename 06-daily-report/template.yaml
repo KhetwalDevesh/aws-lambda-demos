@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 06 - EventBridge Scheduler runs Lambda every day at 09:00 IST and emails a report via SES
+
+Parameters:
+  SenderEmail:
+    Type: String
+    Description: SES-verified sender address
+  RecipientEmail:
+    Type: String
+    Description: SES-verified recipient address (needed while SES is in sandbox)
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 128
+    Timeout: 20
+
+Resources:
+  ReportLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-report
+      RetentionInDays: 3
+
+  ReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-report
+      CodeUri: src/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref ReportLogGroup
+      Environment:
+        Variables:
+          SENDER: !Ref SenderEmail
+          RECIPIENT: !Ref RecipientEmail
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ses:SendEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - s3:ListAllMyBuckets
+                - lambda:ListFunctions
+              Resource: '*'
+      Events:
+        Daily:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 9 * * ? *)
+            ScheduleExpressionTimezone: Asia/Kolkata
+
+Outputs:
+  FunctionName:
+    Value: !Ref ReportFunction

@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 04 - SQS worker with partial batch failures and a dead-letter queue
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 128
+    Timeout: 10
+
+Resources:
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 345600 # 4 days
+
+  JobsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      # Should be >= 6x function timeout
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DeadLetterQueue.Arn
+        maxReceiveCount: 3
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-worker
+      RetentionInDays: 3
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-worker
+      CodeUri: src/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref WorkerLogGroup
+      Events:
+        Jobs:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt JobsQueue.Arn
+            BatchSize: 5
+            MaximumBatchingWindowInSeconds: 2
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+Outputs:
+  JobsQueueUrl:
+    Value: !Ref JobsQueue
+  DeadLetterQueueUrl:
+    Value: !Ref DeadLetterQueue

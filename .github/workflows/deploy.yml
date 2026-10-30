@@ -1,0 +1,24 @@
+name: deploy
+
+# Started by the demo 09 Lambda through the workflow_dispatch API.
+# Prints the commit only; a real deploy would add an AWS role and `sam deploy`.
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Commit that triggered this run
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy (demo)
+        env:
+          SHA: ${{ inputs.sha }}
+        run: echo "Deploying commit $SHA"

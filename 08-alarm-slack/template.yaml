@@ -1,0 +1,88 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 08 - CloudWatch alarm on Lambda errors -> SNS -> Lambda -> Slack webhook
+
+Parameters:
+  SlackWebhookParam:
+    Type: String
+    Default: /lambda-demo/slack-webhook
+    Description: SSM Parameter Store name (SecureString) holding the Slack incoming webhook URL
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 128
+    Timeout: 10
+
+Resources:
+  AlertTopic:
+    Type: AWS::SNS::Topic
+
+  # Deliberately broken function: every invoke throws, which feeds the alarm
+  FlakyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-flaky
+      RetentionInDays: 3
+
+  FlakyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-flaky
+      CodeUri: src/flaky/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref FlakyLogGroup
+
+  FlakyErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${AWS::StackName}-flaky-errors
+      AlarmDescription: flaky function reported errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref FlakyFunction
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+  NotifierLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-notifier
+      RetentionInDays: 3
+
+  NotifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-notifier
+      CodeUri: src/notifier/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref NotifierLogGroup
+      Environment:
+        Variables:
+          WEBHOOK_PARAM: !Ref SlackWebhookParam
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SlackWebhookParam}
+      Events:
+        Alarm:
+          Type: SNS
+          Properties:
+            Topic: !Ref AlertTopic
+
+Outputs:
+  FlakyFunctionName:
+    Value: !Ref FlakyFunction
+  AlarmName:
+    Value: !Ref FlakyErrorsAlarm

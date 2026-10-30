@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 02 - Presigned S3 upload URL (client uploads straight to S3, bypassing Lambda)
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 10
+
+Resources:
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [PUT, GET]
+            AllowedOrigins: ['*']
+            AllowedHeaders: ['*']
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-demo-files
+            Status: Enabled
+            ExpirationInDays: 1
+
+  PresignLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-presign
+      RetentionInDays: 3
+
+  PresignFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-presign
+      CodeUri: src/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref PresignLogGroup
+      Environment:
+        Variables:
+          BUCKET: !Ref UploadBucket
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref UploadBucket
+      Events:
+        Get:
+          Type: HttpApi
+          Properties:
+            Path: /upload-url
+            Method: GET
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/upload-url
+  BucketName:
+    Value: !Ref UploadBucket

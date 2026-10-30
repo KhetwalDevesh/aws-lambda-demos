@@ -1,0 +1,9 @@
+{
+  "name": "crud-api",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.700.0",
+    "@aws-sdk/lib-dynamodb": "^3.700.0"
+  }
+}

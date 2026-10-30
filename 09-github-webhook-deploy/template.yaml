@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 09 - GitHub push webhook -> Function URL -> verify HMAC -> trigger a GitHub Actions deploy workflow
+
+Parameters:
+  GithubRepo:
+    Type: String
+    Description: owner/repo whose workflow should be triggered
+  WorkflowFile:
+    Type: String
+    Default: deploy.yml
+  DeployBranch:
+    Type: String
+    Default: main
+  SecretParamPrefix:
+    Type: String
+    Default: /lambda-demo/github
+    Description: SSM prefix holding SecureStrings webhook-secret and token
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 128
+    Timeout: 15
+
+Resources:
+  WebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-webhook
+      RetentionInDays: 3
+
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-webhook
+      CodeUri: src/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref WebhookLogGroup
+      Environment:
+        Variables:
+          GITHUB_REPO: !Ref GithubRepo
+          WORKFLOW_FILE: !Ref WorkflowFile
+          DEPLOY_BRANCH: !Ref DeployBranch
+          SECRET_PREFIX: !Ref SecretParamPrefix
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SecretParamPrefix}/*
+      # Public URL on purpose: GitHub cannot sign AWS requests. Security comes
+      # from verifying the X-Hub-Signature-256 HMAC inside the function.
+      FunctionUrlConfig:
+        AuthType: NONE
+
+  # Newer accounts also need InvokeFunction for a public Function URL
+  UrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebhookFunction
+      Action: lambda:InvokeFunction
+      Principal: '*'
+      InvokedViaFunctionUrl: true
+
+Outputs:
+  WebhookUrl:
+    Description: Paste into GitHub repo -> Settings -> Webhooks (content type application/json)
+    Value: !GetAtt WebhookFunctionUrl.FunctionUrl

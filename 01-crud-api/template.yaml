@@ -1,0 +1,60 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Demo 01 - REST CRUD API (API Gateway HTTP API + Lambda + DynamoDB)
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Architectures: [arm64]
+    MemorySize: 256
+    Timeout: 10
+
+Resources:
+  ItemsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AWS::StackName}-api
+      RetentionInDays: 3
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-api
+      CodeUri: src/
+      Handler: index.handler
+      LoggingConfig:
+        LogGroup: !Ref ApiLogGroup
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ItemsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ItemsTable
+      Events:
+        Collection:
+          Type: HttpApi
+          Properties:
+            Path: /items
+            Method: ANY
+        Single:
+          Type: HttpApi
+          Properties:
+            Path: /items/{id}
+            Method: ANY
+
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com/items
+  TableName:
+    Value: !Ref ItemsTable
